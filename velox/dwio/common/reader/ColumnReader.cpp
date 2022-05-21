@@ -17,14 +17,17 @@
 #include "velox/dwio/common/reader/ColumnReader.h"
 #include "velox/dwio/common/TypeUtils.h"
 #include "velox/dwio/common/exception/Exceptions.h"
-#include "velox/dwio/dwrf/common/IntCodecCommon.h"
-#include "velox/dwio/dwrf/common/IntDecoder.h"
-#include "velox/dwio/dwrf/reader/ConstantColumnReader.h"
-#include "velox/dwio/dwrf/reader/FlatMapColumnReader.h"
+//#include "velox/dwio/dwrf/common/IntCodecCommon.h"
+//#include "velox/dwio/dwrf/common/IntDecoder.h"
+//#include "velox/dwio/dwrf/reader/ConstantColumnReader.h"
+//#include "velox/dwio/dwrf/reader/FlatMapColumnReader.h"
 #include "velox/type/Type.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/DictionaryVector.h"
 #include "velox/vector/FlatVector.h"
+
+// TODO: Move the IntCodecCommon.h file to velox/common/dwio
+#include "velox/dwio/dwrf/common/IntCodecCommon.h"
 
 #include <folly/Likely.h>
 #include <folly/Portability.h>
@@ -95,54 +98,55 @@ void fillTimestamps(
 //}
 //      ---
 
-template <typename T>
-FlatVector<T>* resetIfWrongFlatVectorType(VectorPtr& result) {
-  return detail::resetIfWrongVectorType<FlatVector<T>>(result);
-}
-
+//      To ColumnReader.h:
+//template <typename T>
+//FlatVector<T>* resetIfWrongFlatVectorType(VectorPtr& result) {
+//  return detail::resetIfWrongVectorType<FlatVector<T>>(result);
+//}
+//      ---
 
 //      To Dwrf:  move to dwrf. Potentially, this can be left in ColumnReader. But considering notNullDecoder_ and memoryPool_, let's move to DwrfColumnReader first    +++
 
-//BufferPtr ColumnReader::readNulls(
-//    vector_size_t numValues,
-//    VectorPtr& result,
-//    const uint64_t* incomingNulls) {
-//  BufferPtr nulls;
-//  readNulls(numValues, incomingNulls, &result, nulls);
-//  return nulls;
-//}
-//
-//void ColumnReader::readNulls(
-//    vector_size_t numValues,
-//    const uint64_t* incomingNulls,
-//    VectorPtr* result,
-//    BufferPtr& nulls) {
-//  if (!notNullDecoder_ && !incomingNulls) {
-//    nulls = nullptr;
-//    if (result && *result) {
-//      (*result)->resetNulls();
-//    }
-//    return;
-//  }
-//  auto numBytes = bits::nbytes(numValues);
-//  if (result && *result) {
-//    nulls = (*result)->mutableNulls(numValues + (simd::kPadding * 8));
-//    detail::resetIfNotWritable(*result, nulls);
-//  }
-//  if (!nulls || nulls->capacity() < numBytes + simd::kPadding) {
-//    nulls =
-//        AlignedBuffer::allocate<char>(numBytes + simd::kPadding, &memoryPool_);
-//  }
-//  nulls->setSize(numBytes);
-//  auto* nullsPtr = nulls->asMutable<uint64_t>();
-//  if (!notNullDecoder_) {
-//    memcpy(nullsPtr, incomingNulls, numBytes);
-//    return;
-//  }
-//  memset(nullsPtr, bits::kNotNullByte, numBytes);
-//  notNullDecoder_->next(
-//      reinterpret_cast<char*>(nullsPtr), numValues, incomingNulls);
-//}
+BufferPtr ColumnReader::readNulls(
+    vector_size_t numValues,
+    VectorPtr& result,
+    const uint64_t* incomingNulls) {
+  BufferPtr nulls;
+  readNulls(numValues, incomingNulls, &result, nulls);
+  return nulls;
+}
+
+void ColumnReader::readNulls(
+    vector_size_t numValues,
+    const uint64_t* incomingNulls,
+    VectorPtr* result,
+    BufferPtr& nulls) {
+  if (!notNullDecoder_ && !incomingNulls) {
+    nulls = nullptr;
+    if (result && *result) {
+      (*result)->resetNulls();
+    }
+    return;
+  }
+  auto numBytes = bits::nbytes(numValues);
+  if (result && *result) {
+    nulls = (*result)->mutableNulls(numValues + (simd::kPadding * 8));
+    detail::resetIfNotWritable(*result, nulls);
+  }
+  if (!nulls || nulls->capacity() < numBytes + simd::kPadding) {
+    nulls =
+        AlignedBuffer::allocate<char>(numBytes + simd::kPadding, &memoryPool_);
+  }
+  nulls->setSize(numBytes);
+  auto* nullsPtr = nulls->asMutable<uint64_t>();
+  if (!notNullDecoder_) {
+    memcpy(nullsPtr, incomingNulls, numBytes);
+    return;
+  }
+  memset(nullsPtr, bits::kNotNullByte, numBytes);
+  notNullDecoder_->next(
+      reinterpret_cast<char*>(nullsPtr), numValues, incomingNulls);
+}
 
 //      ----
 
@@ -164,53 +168,54 @@ FlatVector<T>* resetIfWrongFlatVectorType(VectorPtr& result) {
 //        ---
 
 
-//      To Dwrf: This function is to be pure virtual in ColumnReader. Need to be implemented in DwrfColumnReader +++
-//uint64_t ColumnReader::skip(uint64_t numValues) {
-//  if (notNullDecoder_) {
-//    // page through the values that we want to skip
-//    // and count how many are non-null
-//    std::array<char, BUFFER_SIZE> buffer;
-//    constexpr auto bitCount = BUFFER_SIZE * 8;
-//    uint64_t remaining = numValues;
-//    while (remaining > 0) {
-//      uint64_t chunkSize = std::min(remaining, bitCount);
-//      notNullDecoder_->next(buffer.data(), chunkSize, nullptr);
-//      remaining -= chunkSize;
-//      numValues -= bits::countNulls(
-//          reinterpret_cast<uint64_t*>(buffer.data()), 0, chunkSize);
-//    }
+uint64_t ColumnReader::skip(uint64_t numValues) {
+  if (notNullDecoder_) {
+    // page through the values that we want to skip
+    // and count how many are non-null
+    std::array<char, BUFFER_SIZE> buffer;
+    constexpr auto bitCount = BUFFER_SIZE * 8;
+    uint64_t remaining = numValues;
+    while (remaining > 0) {
+      uint64_t chunkSize = std::min(remaining, bitCount);
+      notNullDecoder_->next(buffer.data(), chunkSize, nullptr);
+      remaining -= chunkSize;
+      numValues -= bits::countNulls(
+          reinterpret_cast<uint64_t*>(buffer.data()), 0, chunkSize);
+    }
+  }
+  return numValues;
+}
+
+
+// +++ Move to ColumnReader.h
+//
+///**
+// * Expand an array of bytes in place to the corresponding bigger.
+// * Has to work backwards so that they data isn't clobbered during the
+// * expansion.
+// * @param buffer the array of chars and array of longs that need to be
+// *        expanded
+// * @param numValues the number of bytes to convert to longs
+// */
+//template <typename From, typename To>
+//std::enable_if_t<std::is_same_v<From, bool>> expandBytes(
+//    To* buffer,
+//    uint64_t numValues) {
+//  for (size_t i = numValues - 1; i < numValues; --i) {
+//    buffer[i] = static_cast<To>(bits::isBitSet(buffer, i));
 //  }
-//  return numValues;
 //}
-//        ---
-
-/**
- * Expand an array of bytes in place to the corresponding bigger.
- * Has to work backwards so that they data isn't clobbered during the
- * expansion.
- * @param buffer the array of chars and array of longs that need to be
- *        expanded
- * @param numValues the number of bytes to convert to longs
- */
-template <typename From, typename To>
-std::enable_if_t<std::is_same_v<From, bool>> expandBytes(
-    To* buffer,
-    uint64_t numValues) {
-  for (size_t i = numValues - 1; i < numValues; --i) {
-    buffer[i] = static_cast<To>(bits::isBitSet(buffer, i));
-  }
-}
-
-template <typename From, typename To>
-std::enable_if_t<std::is_same_v<From, int8_t>> expandBytes(
-    To* buffer,
-    uint64_t numValues) {
-  auto from = reinterpret_cast<int8_t*>(buffer);
-  for (size_t i = numValues - 1; i < numValues; --i) {
-    buffer[i] = static_cast<To>(from[i]);
-  }
-}
-
+//
+//template <typename From, typename To>
+//std::enable_if_t<std::is_same_v<From, int8_t>> expandBytes(
+//    To* buffer,
+//    uint64_t numValues) {
+//  auto from = reinterpret_cast<int8_t*>(buffer);
+//  for (size_t i = numValues - 1; i < numValues; --i) {
+//    buffer[i] = static_cast<To>(from[i]);
+//  }
+//}
+// ---
 
 
 

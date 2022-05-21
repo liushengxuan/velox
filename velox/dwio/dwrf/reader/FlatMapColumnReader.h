@@ -252,7 +252,7 @@ class FlatMapStructEncodingColumnReader : public ColumnReader {
 
 class FlatMapColumnReaderFactory {
  public:
-  static std::unique_ptr<ColumnReader> create(
+  static std::unique_ptr<DwrfColumnReader> create(
       const std::shared_ptr<const dwio::common::TypeWithId>& requestedType,
       const std::shared_ptr<const dwio::common::TypeWithId>& dataType,
       StripeStreams& stripe,

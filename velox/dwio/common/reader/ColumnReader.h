@@ -19,14 +19,48 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/dwio/common/ColumnSelector.h"
 #include "velox/dwio/common/TypeWithId.h"
-#include "velox/dwio/dwrf/common/ByteRLE.h"
-#include "velox/dwio/dwrf/common/Compression.h"
-#include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
-#include "velox/dwio/dwrf/reader/EncodingContext.h"
-#include "velox/dwio/dwrf/reader/StripeStream.h"
+//#include "velox/dwio/dwrf/common/ByteRLE.h"
+//#include "velox/dwio/dwrf/common/Compression.h"
+//#include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
+//#include "velox/dwio/dwrf/reader/EncodingContext.h"
+//#include "velox/dwio/dwrf/reader/StripeStream.h"
 #include "velox/vector/BaseVector.h"
 
+#include "velox/dwio/common/AbstractByteRleDecoder.h"
+
 namespace facebook::velox::dwio::common::reader {
+
+// Some functions from ColumnReader.cpp
+/**
+ * Expand an array of bytes in place to the corresponding bigger.
+ * Has to work backwards so that they data isn't clobbered during the
+ * expansion.
+ * @param buffer the array of chars and array of longs that need to be
+ *        expanded
+ * @param numValues the number of bytes to convert to longs
+ */
+template <typename From, typename To>
+std::enable_if_t<std::is_same_v<From, bool>> expandBytes(
+    To* buffer,
+    uint64_t numValues) {
+  for (size_t i = numValues - 1; i < numValues; --i) {
+    buffer[i] = static_cast<To>(bits::isBitSet(buffer, i));
+  }
+}
+
+template <typename From, typename To>
+std::enable_if_t<std::is_same_v<From, int8_t>> expandBytes(
+    To* buffer,
+    uint64_t numValues) {
+  auto from = reinterpret_cast<int8_t*>(buffer);
+  for (size_t i = numValues - 1; i < numValues; --i) {
+    buffer[i] = static_cast<To>(from[i]);
+  }
+}
+
+
+
+
 
 /**
  * The interface for reading ORC data types.
@@ -34,8 +68,7 @@ namespace facebook::velox::dwio::common::reader {
 class ColumnReader {
  protected:
   explicit ColumnReader(
-      const std::shared_ptr<const dwio::common::TypeWithId>& type) : nodeType_{type} {}
-
+      const std::shared_ptr<const dwio::common::TypeWithId>& type, memory::MemoryPool& memoryPool) : notNullDecoder_{}, nodeType_{type}, memoryPool_{memoryPool} {}
 
 
 //        To Dwrf: These two members are moved to DwrfColumnReader in Constructor +++
@@ -49,11 +82,16 @@ class ColumnReader {
   //          nulls.Takes 'nulls' from 'result' if '*result' is non -
   //      null.Otherwise ensures that 'nulls' has a buffer of sufficient
   //          size and uses this.
-  void readNulls(
+  virtual void readNulls(
       vector_size_t numValues,
       const uint64_t* incomingNulls,
       VectorPtr* result,
       BufferPtr& nulls);
+
+  virtual BufferPtr readNulls(
+      vector_size_t numValues,
+      VectorPtr& result,
+      const uint64_t* incomingNulls);
 
 
 //      To Dwrf: moving the members to DwrfColumnReader +++
@@ -66,12 +104,35 @@ class ColumnReader {
 
 
 
+  std::unique_ptr<AbstractByteRleDecoder> notNullDecoder_;
+
+  // We use AbstractByteRleDecoder as an interface wrapper for ByteRleDecoder so that readNulls can be put in ColumnReader
 
   const std::shared_ptr<const dwio::common::TypeWithId> nodeType_;
+  memory::MemoryPool& memoryPool_;
+
+  // memoryPool_ can be kept here. But The corresponding constructor was following
+  // We need to remove the StripeStreams, instead using memory directly.
+  /*
+    ColumnReader::ColumnReader(
+    std::shared_ptr<const dwio::common::TypeWithId> nodeType,
+    StripeStreams& stripe,
+    FlatMapContext flatMapContext)
+    : nodeType_(std::move(nodeType)),
+      memoryPool_(stripe.getMemoryPool()),
+      flatMapContext_(std::move(flatMapContext)) {
+    EncodingKey encodingKey{nodeType_->id, flatMapContext_.sequence};
+    std::unique_ptr<SeekableInputStream> stream =
+      stripe.getStream(encodingKey.forKind(proto::Stream_Kind_PRESENT), false);
+    if (stream) {
+    notNullDecoder_ = createBooleanRleDecoder(std::move(stream), encodingKey);
+    }
+    }
+   */
+
 
 //      To Dwrf: moving the members to DwrfColumnReader +++
 //  std::unique_ptr<ByteRleDecoder> notNullDecoder_;
-//        memory::MemoryPool& memoryPool_;
 //        FlatMapContext flatMapContext_;
 //      ---
 
@@ -90,6 +151,14 @@ class ColumnReader {
   //      ---
 
   /**
+   * Skip number of specified rows.
+   * @param numValues the number of values to skip
+   * @return the number of non-null values skipped
+   */
+  virtual uint64_t skip(uint64_t numValues);
+
+
+  /**
    * Read the next group of values into a RowVector.
    * @param numValues the number of values to read
    * @param vector to read into
@@ -98,8 +167,6 @@ class ColumnReader {
       uint64_t numValues,
       VectorPtr& result,
       const uint64_t* nulls = nullptr) = 0;
-
-
 
 
   //      To Dwrf: These 2 functions are to be moved to DwrfColumnReader. Rowgroups in parquet means different +++
