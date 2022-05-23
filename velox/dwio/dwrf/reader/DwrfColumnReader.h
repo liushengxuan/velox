@@ -72,6 +72,7 @@ class DwrfColumnReader : public dwio::common::reader::ColumnReader {
 
 
   FlatMapContext flatMapContext_;
+//  std::unique_ptr<ByteRleDecoder> notNullDecoder_;
 
  public:
   DwrfColumnReader(

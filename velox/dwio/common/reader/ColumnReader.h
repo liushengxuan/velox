@@ -104,7 +104,7 @@ class ColumnReader {
 
 
 
-  std::unique_ptr<AbstractByteRleDecoder> notNullDecoder_;
+  std::shared_ptr<AbstractByteRleDecoder> notNullDecoder_;
 
   // We use AbstractByteRleDecoder as an interface wrapper for ByteRleDecoder so that readNulls can be put in ColumnReader
 

@@ -101,7 +101,7 @@ inline RleVersion convertRleVersion(proto::ColumnEncoding_Kind kind) {
 
 template <typename T>
 FlatVector<T>* resetIfWrongFlatVectorType(VectorPtr& result) {
- return detail::resetIfWrongVectorType<FlatVector<T>>(result);
+ return dwio::common::reader::detail::resetIfWrongVectorType<FlatVector<T>>(result);
 }
 
 
@@ -288,7 +288,7 @@ void DwrfByteRleColumnReader<DataType, RequestedType>::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<RequestedType>(numValues, &memoryPool_);
@@ -422,7 +422,7 @@ void DwrfIntegerDirectColumnReader<ReqT>::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<ReqT>(numValues, &memoryPool_);
@@ -562,7 +562,7 @@ void DwrfIntegerDictionaryColumnReader<ReqT>::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<ReqT>(numValues, &memoryPool_);
@@ -580,7 +580,7 @@ void DwrfIntegerDictionaryColumnReader<ReqT>::next(
  // is an offset or a literal value.
  const char* inDict = nullptr;
  if (inDictionaryReader) {
-   detail::ensureCapacity<bool>(inDictionary, numValues, &memoryPool_);
+   dwio::common::reader::detail::ensureCapacity<bool>(inDictionary, numValues, &memoryPool_);
    inDictionaryReader->next(
        inDictionary->asMutable<char>(), numValues, nullsPtr);
    inDict = inDictionary->as<char>();
@@ -669,7 +669,7 @@ void DwrfTimestampColumnReader::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<Timestamp>(numValues, &memoryPool_);
@@ -683,14 +683,14 @@ void DwrfTimestampColumnReader::next(
        &memoryPool_, nulls, nullCount, numValues, values);
  }
 
- detail::ensureCapacity<int64_t>(secondsBuffer_, numValues, &memoryPool_);
- detail::ensureCapacity<uint64_t>(nanosBuffer_, numValues, &memoryPool_);
+ dwio::common::reader::detail::ensureCapacity<int64_t>(secondsBuffer_, numValues, &memoryPool_);
+ dwio::common::reader::detail::ensureCapacity<uint64_t>(nanosBuffer_, numValues, &memoryPool_);
  auto secondsData = secondsBuffer_->asMutable<int64_t>();
  auto nanosData = nanosBuffer_->asMutable<uint64_t>();
  seconds->next(secondsData, numValues, nullsPtr);
  nano->next(reinterpret_cast<int64_t*>(nanosData), numValues, nullsPtr);
  auto* valuesPtr = values->asMutable<Timestamp>();
- detail::fillTimestamps(
+ dwio::common::reader::detail::fillTimestamps(
      valuesPtr, nullsPtr, secondsData, nanosData, numValues);
 }
 
@@ -806,7 +806,7 @@ void DwrfFloatingPointColumnReader<DataT, ReqT>::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<ReqT>(numValues, &memoryPool_);
@@ -1045,7 +1045,7 @@ void DwrfStringDictionaryColumnReader::loadStrideDictionary() {
    strideDictStream->seekToPosition(pp);
    strideDictLengthDecoder->seekToRowGroup(pp);
 
-   detail::ensureCapacity<int64_t>(
+   dwio::common::reader::detail::ensureCapacity<int64_t>(
        strideDictOffset, strideDictCount + 1, &memoryPool_);
    strideDict = loadDictionary(
        strideDictCount,
@@ -1138,7 +1138,7 @@ void DwrfStringDictionaryColumnReader::readDictionaryVector(
    VectorPtr& result,
    const uint64_t* incomingNulls) {
  auto dictVector =
-     detail::resetIfWrongVectorType<DictionaryVector<StringView>>(result);
+     dwio::common::reader::detail::resetIfWrongVectorType<DictionaryVector<StringView>>(result);
  BufferPtr indices;
  if (dictVector) {
    indices = dictVector->mutableIndices(numValues);
@@ -1149,7 +1149,7 @@ void DwrfStringDictionaryColumnReader::readDictionaryVector(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (result) {
-   detail::resetIfNotWritable(result, indices);
+   dwio::common::reader::detail::resetIfNotWritable(result, indices);
  }
  if (!indices) {
    indices = AlignedBuffer::allocate<vector_size_t>(numValues, &memoryPool_);
@@ -1164,7 +1164,7 @@ void DwrfStringDictionaryColumnReader::readDictionaryVector(
  // load inDictionary
  const char* inDictPtr = nullptr;
  if (inDictionaryReader) {
-   detail::ensureCapacity<bool>(inDict, numValues, &memoryPool_);
+   dwio::common::reader::detail::ensureCapacity<bool>(inDict, numValues, &memoryPool_);
    inDictionaryReader->next(inDict->asMutable<char>(), numValues, nullsPtr);
    inDictPtr = inDict->as<char>();
  }
@@ -1281,7 +1281,7 @@ void DwrfStringDictionaryColumnReader::readFlatVector(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (result) {
-   detail::resetIfNotWritable(result, data);
+   dwio::common::reader::detail::resetIfNotWritable(result, data);
  }
  if (!data) {
    data = AlignedBuffer::allocate<StringView>(numValues, &memoryPool_);
@@ -1290,7 +1290,7 @@ void DwrfStringDictionaryColumnReader::readFlatVector(
  // load inDictionary
  const char* inDictPtr = nullptr;
  if (inDictionaryReader) {
-   detail::ensureCapacity<bool>(inDict, numValues, &memoryPool_);
+   dwio::common::reader::detail::ensureCapacity<bool>(inDict, numValues, &memoryPool_);
    inDictionaryReader->next(inDict->asMutable<char>(), numValues, nullsPtr);
    inDictPtr = inDict->as<char>();
  }
@@ -1371,7 +1371,7 @@ void DwrfStringDictionaryColumnReader::ensureInitialized() {
    return;
  }
 
- detail::ensureCapacity<int64_t>(
+ dwio::common::reader::detail::ensureCapacity<int64_t>(
      dictionaryOffset, dictionaryCount + 1, &memoryPool_);
  dictionaryBlob = loadDictionary(
      dictionaryCount, *blobStream, *lengthDecoder, dictionaryOffset);
@@ -1386,7 +1386,7 @@ void DwrfStringDictionaryColumnReader::ensureInitialized() {
        ? flatMapContext_.inMapDecoder->loadIndices(*rowIndex_, 0)
        : 0;
    positionOffset = notNullDecoder_
-       ? notNullDecoder_->loadIndices(*rowIndex_, indexStartOffset)
+       ? std::dynamic_pointer_cast<ByteRleDecoder>(notNullDecoder_)->loadIndices(*rowIndex_, indexStartOffset)
        : indexStartOffset;
    auto offset = strideDictStream->loadIndices(*rowIndex_, positionOffset);
    strideDictSizeOffset =
@@ -1495,7 +1495,7 @@ void DwrfStringDirectColumnReader::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (flatVector) {
-   detail::resetIfNotWritable(result, values);
+   dwio::common::reader::detail::resetIfNotWritable(result, values);
  }
  if (!values) {
    values = AlignedBuffer::allocate<StringView>(numValues, &memoryPool_);
@@ -1626,7 +1626,7 @@ void DwrfStructColumnReader::next(
    uint64_t numValues,
    VectorPtr& result,
    const uint64_t* incomingNulls) {
- auto rowVector = detail::resetIfWrongVectorType<RowVector>(result);
+ auto rowVector = dwio::common::reader::detail::resetIfWrongVectorType<RowVector>(result);
  std::vector<VectorPtr> childrenVectors;
  if (rowVector) {
    // Track children vectors in a local variable because readNulls may reset
@@ -1762,7 +1762,7 @@ void DwrfListColumnReader::next(
    uint64_t numValues,
    VectorPtr& result,
    const uint64_t* incomingNulls) {
- auto resultArray = detail::resetIfWrongVectorType<ArrayVector>(result);
+ auto resultArray = dwio::common::reader::detail::resetIfWrongVectorType<ArrayVector>(result);
  VectorPtr elements;
  BufferPtr offsets;
  BufferPtr lengths;
@@ -1777,7 +1777,7 @@ void DwrfListColumnReader::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (resultArray) {
-   detail::resetIfNotWritable(result, offsets, lengths);
+   dwio::common::reader::detail::resetIfNotWritable(result, offsets, lengths);
  }
 
  if (!offsets) {
@@ -1922,7 +1922,7 @@ void DwrfMapColumnReader::next(
    uint64_t numValues,
    VectorPtr& result,
    const uint64_t* incomingNulls) {
- auto resultMap = detail::resetIfWrongVectorType<MapVector>(result);
+ auto resultMap = dwio::common::reader::detail::resetIfWrongVectorType<MapVector>(result);
  VectorPtr keys;
  VectorPtr values;
  BufferPtr offsets;
@@ -1939,7 +1939,7 @@ void DwrfMapColumnReader::next(
  uint64_t nullCount = nullsPtr ? bits::countNulls(nullsPtr, 0, numValues) : 0;
 
  if (resultMap) {
-   detail::resetIfNotWritable(result, offsets, lengths);
+   dwio::common::reader::detail::resetIfNotWritable(result, offsets, lengths);
  }
 
  if (!offsets) {
@@ -2209,8 +2209,8 @@ std::unique_ptr<DwrfColumnReader> DwrfColumnReader::build(
 }
 
 // static
-ColumnReaderFactory* ColumnReaderFactory::baseFactory() {
- static auto instance = std::make_unique<ColumnReaderFactory>();
+DwrfColumnReaderFactory* DwrfColumnReaderFactory::baseFactory() {
+ static auto instance = std::make_unique<DwrfColumnReaderFactory>();
  return instance.get();
 }
 
