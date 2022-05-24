@@ -26,7 +26,11 @@
 #include <fmt/format.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <gtest/gtest_prod.h>
+//#include <gtest/gtest_prod.h>
+
+#include "third_party/googletest/googletest/include/gtest/gtest_prod.h"
+
+
 
 #include "folly/CPortability.h"
 #include "folly/Likely.h"

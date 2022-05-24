@@ -17,15 +17,15 @@
 #pragma once
 
 #include <memory>
-#include "velox/common/base/BitUtil.h"
-#include "velox/common/base/Nulls.h"
-#include "velox/dwio/dwrf/common/Common.h"
-#include "velox/dwio/dwrf/common/InputStream.h"
-#include "velox/dwio/dwrf/common/IntCodecCommon.h"
-#include "velox/dwio/dwrf/common/OutputStream.h"
-#include "velox/dwio/dwrf/common/Range.h"
+//#include "velox/common/base/BitUtil.h"
+//#include "velox/common/base/Nulls.h"
+//#include "velox/dwio/dwrf/common/Common.h"
+//#include "velox/dwio/dwrf/common/InputStream.h"
+//#include "velox/dwio/dwrf/common/IntCodecCommon.h"
+//#include "velox/dwio/dwrf/common/OutputStream.h"
+//#include "velox/dwio/dwrf/common/Range.h"
 #include "velox/dwio/dwrf/common/wrap/dwrf-proto-wrapper.h"
-#include "velox/vector/TypeAliases.h"
+//#include "velox/vector/TypeAliases.h"
 
 namespace facebook::velox::dwio::common {
 
