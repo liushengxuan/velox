@@ -22,6 +22,9 @@ DwrfColumnReader.cpp
   FlatMapColumnReader.cpp
   FlatMapHelper.cpp
   ReaderBase.cpp
+
+        DwrfSelectiveColumnReader.cpp
+#        DwrfSelectiveStringDirectColumnReader.cpp
   SelectiveColumnReader.cpp
   SelectiveByteRleColumnReader.cpp
   SelectiveIntegerDirectColumnReader.cpp

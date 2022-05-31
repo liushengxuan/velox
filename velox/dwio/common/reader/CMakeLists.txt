@@ -14,7 +14,8 @@
 
 add_library(
   velox_dwio_common_reader
-  ColumnReader.cpp)
+  ColumnReader.cpp
+  SelectiveColumnReader.cpp)
 
 target_link_libraries(
         velox_dwio_common_reader
