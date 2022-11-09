@@ -33,20 +33,28 @@ using namespace facebook::velox::dwio::common;
 using namespace facebook::velox::parquet;
 using namespace facebook::velox::test;
 
-// TODO: Note that the kNumRowsPerBatch needs to be a small number for now. For
-// details please see https://github.com/facebookincubator/velox/issues/2844
 const uint32_t kNumRowsPerBatch = 60000;
-const uint32_t kNumBatches = 40;
+const uint32_t kNumBatches = 50;
 const uint32_t kNumRowsPerRowGroup = 10000;
+const double kFilterErrorMargin = 0.2;
 
 class ParquetReaderBenchmark {
  public:
-  ParquetReaderBenchmark() {
-    pool_ = memory::getDefaultMemoryPool();
+  ParquetReaderBenchmark(bool disableDictionary)
+      : disableDictionary_(disableDictionary) {
+    pool_ = memory::getDefaultScopedMemoryPool();
     dataSetBuilder_ = std::make_unique<DataSetBuilder>(*pool_.get(), 0);
 
     auto sink = std::make_unique<FileSink>("test.parquet");
-    auto writerProperties = ::parquet::WriterProperties::Builder().build();
+    std::shared_ptr<::parquet::WriterProperties> writerProperties;
+    if (disableDictionary_) {
+      // The parquet file is in plain encoding format.
+      writerProperties =
+          ::parquet::WriterProperties::Builder().disable_dictionary()->build();
+    } else {
+      // The parquet file is in dictionary encoding format.
+      writerProperties = ::parquet::WriterProperties::Builder().build();
+    }
     writer_ = std::make_unique<facebook::velox::parquet::Writer>(
         std::move(sink), *pool_, 10000, writerProperties);
   }
@@ -64,13 +72,44 @@ class ParquetReaderBenchmark {
     writer_->flush();
   }
 
+  FilterSpec createFilterSpec(
+      const std::string columnName,
+      float startPct,
+      float selectPct,
+      const TypePtr& type,
+      bool isForRowGroupSkip,
+      bool allowNulls) {
+    switch (type->childAt(0)->kind()) {
+      case TypeKind::BIGINT:
+      case TypeKind::INTEGER:
+        return FilterSpec(
+            columnName,
+            startPct,
+            selectPct,
+            FilterKind::kBigintRange,
+            false,
+            allowNulls);
+      case TypeKind::DOUBLE:
+        return FilterSpec(
+            columnName,
+            startPct,
+            selectPct,
+            FilterKind::kDoubleRange,
+            false,
+            allowNulls);
+      default:
+        VELOX_FAIL("Unsupported Data Type {}", type->childAt(0)->toString());
+    }
+    return FilterSpec(columnName, startPct, selectPct, FilterKind(), false);
+  }
+
   std::shared_ptr<ScanSpec> createScanSpec(
       const std::vector<RowVectorPtr>& batches,
       RowTypePtr& rowType,
-      const std::vector<FilterSpec>& filterSpecs) {
+      const std::vector<FilterSpec>& filterSpecs,
+      std::vector<uint64_t>& hitRows) {
     std::unique_ptr<FilterGenerator> filterGenerator =
         std::make_unique<FilterGenerator>(rowType, 0);
-    std::vector<uint64_t> hitRows;
     auto filters =
         filterGenerator->makeSubfieldFilters(filterSpecs, batches, hitRows);
     auto scanSpec = filterGenerator->makeScanSpec(std::move(filters));
@@ -79,7 +118,8 @@ class ParquetReaderBenchmark {
 
   std::unique_ptr<RowReader> createReader(
       const ParquetReaderType& parquetReaderType,
-      std::shared_ptr<ScanSpec> scanSpec) {
+      std::shared_ptr<ScanSpec> scanSpec,
+      const RowTypePtr& rowType) {
     dwio::common::ReaderOptions readerOpts;
     auto input = std::make_unique<FileInputStream>("test.parquet");
 
@@ -97,50 +137,55 @@ class ParquetReaderBenchmark {
     }
 
     dwio::common::RowReaderOptions rowReaderOpts;
+    rowReaderOpts.select(
+        std::make_shared<facebook::velox::dwio::common::ColumnSelector>(
+            rowType, rowType->names()));
     rowReaderOpts.setScanSpec(scanSpec);
     auto rowReader = reader->createRowReader(rowReaderOpts);
 
     return rowReader;
   }
 
-  void read(
+  int read(
       const ParquetReaderType& parquetReaderType,
       const RowTypePtr& rowType,
       std::shared_ptr<ScanSpec> scanSpec,
       uint32_t nextSize) {
-    auto rowReader = createReader(parquetReaderType, scanSpec);
+    auto rowReader = createReader(parquetReaderType, scanSpec, rowType);
     runtimeStats_ = dwio::common::RuntimeStatistics();
 
     rowReader->resetFilterCaches();
     auto result = BaseVector::create(rowType, 1, pool_.get());
-
+    int resultSize = 0;
     while (true) {
-      {
-        bool hasData = rowReader->next(nextSize, result);
-        if (!hasData) {
-          break;
-        }
+      bool hasData = rowReader->next(nextSize, result);
 
-        if (result->size() == 0) {
-          continue;
-        }
+      if (!hasData) {
+        break;
+      }
+      resultSize += result->size();
 
-        auto rowVector = result->asUnchecked<RowVector>();
-        for (auto i = 0; i < rowVector->childrenSize(); ++i) {
-          rowVector->childAt(i)->loadedVector();
-        }
+      if (result->size() == 0) {
+        continue;
+      }
+
+      auto rowVector = result->asUnchecked<RowVector>();
+      for (auto i = 0; i < rowVector->childrenSize(); ++i) {
+        rowVector->childAt(i)->loadedVector();
       }
     }
 
     rowReader->updateRuntimeStats(runtimeStats_);
+    return resultSize;
   }
 
-  void readSingleColumnPlain(
+  void readSingleColumn(
       const ParquetReaderType& parquetReaderType,
       const std::string& columnName,
       const TypePtr& type,
+      float startPct,
+      float selectPct,
       uint8_t nullsRateX100,
-      const FilterSpec& filterSpec,
       uint32_t nextSize) {
     folly::BenchmarkSuspender suspender;
 
@@ -152,11 +197,36 @@ class ParquetReaderBenchmark {
             .build();
     writeToFile(*batches, true);
 
-    auto scanSpec = createScanSpec(*batches, rowType, {filterSpec});
+    FilterSpec filterSpec = createFilterSpec(
+        columnName, startPct, selectPct, rowType, false, false);
+
+    std::vector<uint64_t> hitRows;
+    auto scanSpec = createScanSpec(*batches, rowType, {filterSpec}, hitRows);
 
     suspender.dismiss();
 
-    read(parquetReaderType, rowType, scanSpec, nextSize);
+    // Filter range is generated from a small sample data of 4096 rows. So the
+    // upperBound and lowerBound are introduced to estimate the result size.
+    auto resultSize = read(parquetReaderType, rowType, scanSpec, nextSize);
+
+    // Add one to expected to avoid 0 in calculating upperBound and lowerBound.
+    int expected = kNumBatches * kNumRowsPerBatch *
+            (1 - (double)nullsRateX100 / 100) * ((double)selectPct / 100) +
+        1;
+
+    // Make the upperBound and lowerBound large enough to avoid very small
+    // resultSize and expected size, where the diff ratio is relatively very
+    // large.
+    int upperBound = expected * (1 + kFilterErrorMargin) + 1;
+    int lowerBound = expected * (1 - kFilterErrorMargin) - 1;
+    upperBound = std::max(16, upperBound);
+    lowerBound = std::max(0, lowerBound);
+
+    VELOX_CHECK(
+        resultSize <= upperBound && resultSize >= lowerBound,
+        "Result Size {} and Expected Size {} Mismatch",
+        resultSize,
+        expected);
   }
 
  private:
@@ -165,43 +235,128 @@ class ParquetReaderBenchmark {
   dwio::common::DataSink* sinkPtr_;
   std::unique_ptr<facebook::velox::parquet::Writer> writer_;
   RuntimeStatistics runtimeStats_;
+  bool disableDictionary_;
 };
 
-BENCHMARK(single_column_bigint_plain_nonull_filterNothing_10000) {
-  std::string columnName = "bigint";
-  FilterSpec filterSpec(columnName, 0, 100, FilterKind::kBigintRange, true);
-
-  ParquetReaderBenchmark benchmark;
-  benchmark.readSingleColumnPlain(
-      ParquetReaderType::NATIVE, columnName, BIGINT(), 0, filterSpec, 10000);
+void run(
+    uint32_t,
+    const TypePtr& type,
+    float filterRateX100,
+    uint8_t nullsRateX100,
+    uint32_t nextSize,
+    bool disableDictionary) {
+  ParquetReaderBenchmark benchmark(disableDictionary);
+  BIGINT()->toString();
+  benchmark.readSingleColumn(
+      ParquetReaderType::NATIVE,
+      type->toString(),
+      type,
+      0,
+      filterRateX100,
+      nullsRateX100,
+      nextSize);
 }
 
-BENCHMARK(single_column_bigint_plain_partialnulls_filterNothing_10000) {
-  std::string columnName = "bigint";
-  FilterSpec filterSpec(columnName, 0, 100, FilterKind::kBigintRange, true);
+#define PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, _null_) \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_5000_dict,       \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      5000,                                                               \
+      false);                                                             \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_5000_plain,      \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      5000,                                                               \
+      true);                                                              \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_10000_dict,      \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      10000,                                                              \
+      false);                                                             \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_10000_plain,     \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      10000,                                                              \
+      true);                                                              \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_20000_dict,      \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      20000,                                                              \
+      false);                                                             \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_20000_plain,     \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      20000,                                                              \
+      true);                                                              \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_50000_dict,      \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      50000,                                                              \
+      false);                                                             \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_50000_plain,     \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      50000,                                                              \
+      true);                                                              \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_100000_dict,     \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      100000,                                                             \
+      false);                                                             \
+  BENCHMARK_NAMED_PARAM(                                                  \
+      run,                                                                \
+      _name_##_Filter_##_filter_##_Nulls_##_null_##_next_100000_plain,    \
+      _type_,                                                             \
+      _filter_,                                                           \
+      _null_,                                                             \
+      100000,                                                             \
+      true);                                                              \
+  BENCHMARK_DRAW_LINE();
 
-  ParquetReaderBenchmark benchmark;
-  benchmark.readSingleColumnPlain(
-      ParquetReaderType::NATIVE, columnName, BIGINT(), 50, filterSpec, 10000);
-}
+#define PARQUET_BENCHMARKS_FILTERS(_type_, _name_, _filter_)    \
+  PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, 0)  \
+  PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, 20) \
+  PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, 50) \
+  PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, 70) \
+  PARQUET_BENCHMARKS_NULLS_FILTER(_type_, _name_, _filter_, 100)
 
-BENCHMARK(single_column_bigint_plain_nonull_filter50_10000) {
-  std::string columnName = "bigint";
-  FilterSpec filterSpec(columnName, 0, 50, FilterKind::kBigintRange, true);
+#define PARQUET_BENCHMARKS(_type_, _name_)        \
+  PARQUET_BENCHMARKS_FILTERS(_type_, _name_, 0)   \
+  PARQUET_BENCHMARKS_FILTERS(_type_, _name_, 20)  \
+  PARQUET_BENCHMARKS_FILTERS(_type_, _name_, 50)  \
+  PARQUET_BENCHMARKS_FILTERS(_type_, _name_, 70)  \
+  PARQUET_BENCHMARKS_FILTERS(_type_, _name_, 100) \
+  BENCHMARK_DRAW_LINE();
 
-  ParquetReaderBenchmark benchmark;
-  benchmark.readSingleColumnPlain(
-      ParquetReaderType::NATIVE, columnName, BIGINT(), 0, filterSpec, 10000);
-}
-
-BENCHMARK(single_column_bigint_plain_partialnulls_filter50_10000) {
-  std::string columnName = "bigint";
-  FilterSpec filterSpec(columnName, 0, 50, FilterKind::kBigintRange, true);
-
-  ParquetReaderBenchmark benchmark;
-  benchmark.readSingleColumnPlain(
-      ParquetReaderType::NATIVE, columnName, BIGINT(), 50, filterSpec, 10000);
-}
+PARQUET_BENCHMARKS(BIGINT(), BigInt);
+PARQUET_BENCHMARKS(DOUBLE(), Double);
 
 // TODO: Add all data types
 // TODO: Add dictionary encoded data
