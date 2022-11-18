@@ -17,9 +17,9 @@ add_subdirectory(thrift)
 add_subdirectory(reader)
 add_subdirectory(writer)
 
-if(${VELOX_BUILD_TESTING})
+#if(${VELOX_BUILD_TESTING})
   add_subdirectory(tests)
-endif()
+#endif()
 
 add_library(velox_dwio_parquet_reader RegisterParquetReader.cpp)
 target_link_libraries(

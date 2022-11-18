@@ -64,7 +64,6 @@ option(VELOX_ENABLE_HDFS "Build Hdfs Connector" OFF)
 option(VELOX_ENABLE_PARQUET "Enable Parquet support" OFF)
 option(VELOX_ENABLE_ARROW "Enable Arrow support" OFF)
 option(VELOX_BUILD_TEST_UTILS "Enable Velox test utilities" OFF)
-option(VELOX_BUILD_PYTHON_PACKAGE "Enable Velox Python bindings" OFF)
 
 if(${VELOX_BUILD_MINIMAL})
   # Enable and disable components for velox base build
@@ -127,12 +126,12 @@ if(VELOX_ENABLE_HDFS)
   add_definitions(-DVELOX_ENABLE_HDFS3)
 endif()
 
-if(VELOX_ENABLE_PARQUET)
+#if(VELOX_ENABLE_PARQUET)
   add_definitions(-DVELOX_ENABLE_PARQUET)
   # Native Parquet reader requires Apache Thrift and Arrow Parquet writer, which
   # are included in Arrow.
   set(VELOX_ENABLE_ARROW ON)
-endif()
+#endif()
 
 # Turn on Codegen only for Clang and non Mac systems.
 if((NOT DEFINED VELOX_CODEGEN_SUPPORT)
@@ -289,12 +288,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
   find_package(ICU REQUIRED)
   include_directories(${ICU_INCLUDE_DIRS})
   link_directories("${ICU_INCLUDE_DIRS}/../lib")
-endif()
-
-if(VELOX_BUILD_PYTHON_PACKAGE)
-  message(STATUS "Adding pybind11")
-  set(pybind11_SOURCE AUTO)
-  resolve_dependency(pybind11 REQUIRED_VERSION 2.10.0)
 endif()
 
 # Locate or build folly.
