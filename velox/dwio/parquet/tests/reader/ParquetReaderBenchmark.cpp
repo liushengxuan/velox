@@ -42,7 +42,7 @@ class ParquetReaderBenchmark {
  public:
   ParquetReaderBenchmark(bool disableDictionary)
       : disableDictionary_(disableDictionary) {
-    pool_ = memory::getDefaultScopedMemoryPool();
+    pool_ = memory::getDefaultMemoryPool();
     dataSetBuilder_ = std::make_unique<DataSetBuilder>(*pool_.get(), 0);
 
     auto sink = std::make_unique<FileSink>("test.parquet");
